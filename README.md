@@ -115,4 +115,4 @@ You're free to improve on this structure or restructure it entirely -- what matt
 See `data/README.md`.
 
 ## Comparison between LR and DT
-Decision tree seemms to be suffering from overfitting, having more 20% of accuracy in the train set than test set. While logistic regression shows more stable and better performance on the test set.
+Decision tree seemms to be suffering from overfitting, having more 20% of accuracy in the train set than test set. While logistic regression shows more stable and better performance on the test set (+5%).
