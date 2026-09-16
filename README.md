@@ -1,3 +1,5 @@
+## 20260493, Eduardo Cavalcante
+
 # Baseline Predictive Pipeline -- ETAI
 
 This is the **starting point** for your semester project: a small but *complete* predictive pipeline -- every piece a real project needs (entry point, config, data loading, preprocessing, model, evaluation), just kept as simple as possible for now.
@@ -111,3 +113,6 @@ You're free to improve on this structure or restructure it entirely -- what matt
 ## Dataset
 
 See `data/README.md`.
+
+## Comparison between LR and DT
+Decision tree seemms to be suffering from overfitting, having more 20% of accuracy in the train set than test set. While logistic regression shows more stable and better performance on the test set.
