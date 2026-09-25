@@ -60,3 +60,4 @@ Decision tree seemms to be suffering from overfitting, having more 20% of accura
 ## WEEK 3
 After cleaning the dataset and running the decision tree, the model’s predictive power decreased, although this was practically negligible (around 2%, from 63.4% to 61.3% on the test set). Furthermore, the decision tree continued to show signs of overfitting.
 The same was true for logistic regression. There was a negligible decrease in predictive power (67.8% to 66.5%); however, it remains the better option of the two models used.
+
