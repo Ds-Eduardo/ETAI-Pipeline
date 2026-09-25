@@ -43,19 +43,64 @@ diagnostics:
   redundant_columns: ["prior_offenses", "age_in_months", "juvenile_total"]
 
 preprocessing:
-  numeric_features: ["age", "juv_fel_count", "juv_misd_count", "juv_other_count", "priors_count"]
+  numeric_features: ["age", "juv_fel_count", "juv_misd_count", "juv_other_count", "priors_count", "priors_per_adult_year", "juv_severity"]
   categorical_features: ["sex", "age_cat", "c_charge_degree"]
   mnar_indicator_sources: ["priors_count", "c_charge_degree"]
+  encoder: "target"
+  scaler: "robust"
+  random_state: 42         
+  imputation:
+    numeric_strategy: "median"
+    categorical_strategy: "most_frequent"
 
   
 split:
   test_size: 0.2
   random_state: 42
 
+cv:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+  scoring: "accuracy"
+  n_jobs: 1
+
+tuning:
+  enabled: true
+  n_trials: 30              # use 5 while testing: the cost is outer folds x n_trials x inner folds
+  n_splits: 5               # INNER folds
+  random_state: 42
+  n_jobs: 1
+  # Keys are Pipeline parameter names ("model" is the estimator step). A model without an
+  # entry here (e.g. logistic_regression, dummy) is only evaluated with its default params.
+  search_spaces:
+    decision_tree:
+      model__max_depth:        {type: int, low: 2, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 50, log: true}
+    random_forest:
+      model__max_depth:        {type: int, low: 2, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 50, log: true}
+      model__max_features:     {type: float, low: 0.2, high: 1.0}
+    oblique_random_forest:
+      model__estimator__tree__max_depth:        {type: int, low: 2, high: 20}
+      model__estimator__tree__min_samples_leaf: {type: int, low: 1, high: 50, log: true}
+      model__estimator__project__n_components:  {type: int, low: 4, high: 12}
+    adaboost:
+      model__n_estimators:         {type: int, low: 50, high: 500}
+      model__learning_rate:        {type: float, low: 0.01, high: 2.0, log: true}
+      model__estimator__max_depth: {type: int, low: 1, high: 4}
+
 model:
-  type: "logistic_regression"   # or "decision_tree"
+  type: "random_forest"     # dummy | logistic_regression | decision_tree | random_forest | oblique_random_forest | adaboost
   params:
-    max_iter: 1000
+    n_estimators: 200       # more trees never overfit, they only cost time
+    random_state: 42
+    n_jobs: -1              # -1 = all CPU cores
+  # Other models' params, to swap in:
+  # decision_tree:          {random_state: 42}
+  # logistic_regression:    {max_iter: 2000}
+  # oblique_random_forest:  {n_estimators: 200, n_components: 10, random_state: 42, n_jobs: -1}
+  # adaboost:               {max_depth: 1, n_estimators: 200, learning_rate: 1.0, random_state: 42}
 
 output:
   results_dir: "results"   # each run's full report is saved here as a timestamped .txt file
