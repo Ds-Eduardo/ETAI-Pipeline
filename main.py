@@ -11,10 +11,11 @@ This orchestrates the full (deliberately simple) pipeline:
 import yaml
 
 from src.data import load_data
-from src.preprocessing import preprocess
+from src.preprocessing import clean_data, split_features_target, build_preprocessor, split_train_test
 from src.model import build_model
 from src.evaluate import evaluate, fairness_report
 from src.results import save_run
+from sklearn.pipeline import Pipeline
 
 
 def load_config(path: str = "config.yaml") -> dict:
@@ -26,22 +27,27 @@ def main():
     config = load_config()
 
     df = load_data(config["data"]["path"])
+    df = clean_data(df, config["diagnostics"])
 
-    X_train, X_test, y_train, y_test, extras_test = preprocess(
-        df,
-        target=config["data"]["target"],
-        sensitive_attr=config["data"]["sensitive_attr"],
-        drop_columns=config["data"]["drop_columns"],
+    mnar_sources = config["preprocessing"].get("mnar_indicator_sources", [])
+    X, y, extras = split_features_target(df, config["data"], mnar_sources)
+
+    X_train, X_test, y_train, y_test, extras_train, extras_test = split_train_test(
+        X, y, extras,
         test_size=config["split"]["test_size"],
         random_state=config["split"]["random_state"],
     )
 
-    model = build_model(config["model"])
-    model.fit(X_train, y_train)
+    preprocessor = build_preprocessor(config["preprocessing"])
+    pipeline = Pipeline([
+        ("prep", preprocessor),
+        ("model", build_model(config["model"])),
+    ])
+    pipeline.fit(X_train, y_train)
 
     # predict on both splits -- train accuracy vs. test accuracy is how we'll spot overfitting, not just how "good" the model looks
-    y_train_pred = model.predict(X_train)
-    y_test_pred = model.predict(X_test)
+    y_train_pred = pipeline.predict(X_train)
+    y_test_pred = pipeline.predict(X_test)
 
     report = evaluate(y_train, y_train_pred, y_test, y_test_pred)
     report += "\n" + fairness_report(
