@@ -67,10 +67,6 @@ The same was true for logistic regression. There was a negligible decrease in pr
 
 ## Feature engineering comparison
 
-`add_engineered_features()` creates `juvenile_total` (the sum of the three juvenile offense counts), `priors_per_year` (`priors_count / age`), and `age_x_log_priors` (`age * log1p(priors_count)`). These are deterministic, row-level transformations and learn nothing from the data, so they can be computed before the development/test split. Missing inputs remain missing for imputation inside the pipeline.
-
-The nested comparison uses the same five outer folds for each feature set and model, with three inner folds to tune each model. It is run on the development set; the locked test set is not scored.
-
 | Model | Baseline accuracy (mean ± fold SD) | Engineered accuracy (mean ± fold SD) | Mean gain |
 |-------|------------------------------------|--------------------------------------|-----------|
 | Logistic regression | 0.660 ± 0.014 | 0.670 ± 0.016 | +0.009 |
@@ -95,7 +91,7 @@ I would choose tuned AdaBoost as a practical candidate: its nested-CV mean is 0.
 
 ## Week 7
 
-All rows use ROC-AUC on the development set (5-fold stratified CV); the locked test set is not used. *Default* uses the `config.yaml` parameters; *Tuned* is nested CV (5 outer folds, 30 Optuna trials per search, 5 inner folds). Logistic regression and the dummy have no search space, so they are only evaluated with their default parameters. No-model floor (dummy, same folds): **0.500**.
+All rows use ROC-AUC on the development set (5-fold stratified CV); the locked test set is not used. Defaull uses the `config.yaml` parameters; Tuned is nested CV (5 outer folds, 30 Optuna trials per search, 5 inner folds). Logistic regression and the dummy have no search space, so they are only evaluated with their default parameters. No-model floor (dummy, same folds): **0.500**.
 
 | Model | Default: CV mean ± std (gap) | Tuned: nested CV mean ± std | Chosen hyperparameters |
 |---|---|---|---|
