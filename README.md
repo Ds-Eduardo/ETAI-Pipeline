@@ -92,3 +92,23 @@ All rows use accuracy on the development set: default five-fold CV and, where a 
 | AdaBoost | 0.678 ± 0.008 (+0.003) | 0.676 ± 0.007 (+0.009) | 0.680 | n_estimators=230, learning_rate=0.1568, estimator max_depth=4 |
 
 I would choose tuned AdaBoost as a practical candidate: its nested-CV mean is 0.676, tied with oblique random forest at the displayed precision, and its 0.005 lead over random forest is smaller than its fold-to-fold SD of 0.007. The depths are broadly plausible: the standalone tree is capped at depth 4, while the ordinary forest can use deeper trees (depth 11) because averaging reduces variance, and its minimum leaf size of 8 regularizes individual trees. The oblique forest uses depth 6 and leaves of at least 15 after projecting features, while AdaBoost's depth-4 learners are more complex than classic stumps but use a low learning rate of 0.1568 over 230 estimators. I would report AdaBoost's nested-CV accuracy of **0.676 ± 0.007** (gap +0.009) for the tuned procedure, not the best-trial score of 0.680, which is optimistically selected.
+
+## Week 7
+
+All rows use ROC-AUC on the development set (5-fold stratified CV); the locked test set is not used. *Default* uses the `config.yaml` parameters; *Tuned* is nested CV (5 outer folds, 30 Optuna trials per search, 5 inner folds). Logistic regression and the dummy have no search space, so they are only evaluated with their default parameters. No-model floor (dummy, same folds): **0.500**.
+
+| Model | Default: CV mean ± std (gap) | Tuned: nested CV mean ± std | Chosen hyperparameters |
+|---|---|---|---|
+| AdaBoost | 0.722 ± 0.014 (+0.008) | 0.728 ± 0.012 | n_estimators=486, learning_rate=0.1515, estimator max_depth=4 |
+| Gradient boosting | 0.725 ± 0.015 (+0.028) | 0.727 ± 0.012 | n_estimators=220, learning_rate=0.03432, max_depth=2, min_samples_leaf=6, subsample=0.7877 |
+| Oblique random forest | 0.679 ± 0.015 (+0.169) | 0.726 ± 0.012 | tree max_depth=4, tree min_samples_leaf=1, projection n_components=7 |
+| HistGradientBoosting | 0.714 ± 0.017 (+0.073) | 0.726 ± 0.014 | max_iter=314, learning_rate=0.01411, max_leaf_nodes=5, min_samples_leaf=85, l2_regularization=2.252 |
+| Random forest | 0.682 ± 0.016 (+0.135) | 0.726 ± 0.013 | max_depth=4, min_samples_leaf=8, max_features=0.6226 |
+| Logistic regression | 0.723 ± 0.013 (+0.002) | — | — |
+| Decision tree | 0.597 ± 0.018 (+0.130) | 0.718 ± 0.011 | max_depth=11, min_samples_leaf=120, criterion=gini |
+| Naive Bayes | 0.696 ± 0.012 (+0.002) | 0.703 ± 0.012 | var_smoothing=0.0009348 |
+| Dummy (floor) | 0.500 ± 0.000 (+0.000) | — | — |
+
+### Selection metric
+
+I kept ROC-AUC as the selection metric. COMPAS is a risk score used to rank people, and ROC-AUC scores that ranking over every threshold, so it does not depend on the 0.5 cut-off, which is a separate decision. It also has an interpretable floor (0.500 for the dummy, whereas accuracy's floor here is 0.549, the majority-class rate).
