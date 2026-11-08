@@ -31,6 +31,13 @@ def save_run(results_dir: str, run: str, config: dict, report_text: str) -> str:
         )
     else:
         tuning_line = "off"
+    selection = config.get("feature_selection") or {}
+    if selection.get("enabled"):
+        selection_line = f"VoteSelector(min_votes={selection.get('min_votes', 2)})"
+        if tuning.get("enabled") and selection.get("search_space"):
+            selection_line += "  (min_votes tuned together with the model)"
+    else:
+        selection_line = "off"
     header = (
         f"Run: {run}\n"
         f"Configured model: {config['model']['type']}  params={config['model'].get('params')}\n"

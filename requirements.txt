@@ -7,3 +7,4 @@ scikit-learn>=1.9
 category-encoders>=2.6
 PyYAML>=6.0
 optuna>=4.0
+xgboost>=2.0

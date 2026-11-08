@@ -108,3 +108,31 @@ All rows use ROC-AUC on the development set (5-fold stratified CV); the locked t
 ### Selection metric
 
 I kept ROC-AUC as the selection metric. COMPAS is a risk score used to rank people, and ROC-AUC scores that ranking over every threshold, so it does not depend on the 0.5 cut-off, which is a separate decision. It also has an interpretable floor (0.500 for the dummy, whereas accuracy's floor here is 0.549, the majority-class rate).
+
+## Week 8
+### Feature selection (W8)
+
+XGBoost, tuned, ROC-AUC on the development set: nested CV with 5 outer folds, 30 Optuna trials and 5 inner folds. Same outer folds in both runs; the locked test set is not used.
+
+| Run | Nested CV mean ± std | Features kept | Chosen hyperparameters |
+|---|---|---|---|
+| With selection (VoteSelector, `min_votes` tuned) | 0.726 ± 0.011 | age, priors_count, priors_per_adult_year (3 of 12) | n_estimators=212, learning_rate=0.08265, max_depth=2, min_child_weight=1.177, subsample=0.7439, colsample_bytree=0.6198, reg_lambda=4.976, reg_alpha=0.8586, gamma=3.939, select__min_votes=2 |
+| Without selection | 0.728 ± 0.014 | all 12 | n_estimators=292, learning_rate=0.01303, max_depth=6, min_child_weight=15.61, subsample=0.6714, colsample_bytree=0.678, reg_lambda=0.1487, reg_alpha=0.1917, gamma=2.358 |
+
+Corrected paired t-test (with − without): mean difference −0.0012, selection better in 2 of 5 folds, t = −0.39, p = 0.717.
+
+The smaller model is as good as the full one: it gives up 0.001 ROC-AUC, about a tenth of the fold-to-fold std (0.011–0.014), and the corrected test finds no evidence of a difference (p = 0.72). It does so with 3 of 12 features, and its tuned trees are shallower (depth 2 against 6) and more regularised, which fits a signal this weak. I would keep selection on: the score is the same, the model is simpler to explain (age and prior record carry it), and it needs fewer inputs, at the price of a slower fit and one more tuned setting (`min_votes`). Two caveats: with only 5 folds the test has little power, so this is "no detectable loss", not proof of equality; and the kept features come from the final fit on all development rows, so other folds may keep slightly different sets. I would report the nested-CV score, 0.726 ± 0.011 with selection.
+
+| Model | Untuned (roc_auc) | Tuned, nested CV (roc_auc, mean ± std) | Chosen hyperparameters |
+|---|---|---|---|
+| adaboost | 0.722 | 0.728 ± 0.012 | n_estimators=486, learning_rate=0.1515, estimator__max_depth=4 |
+| xgboost | 0.722 | 0.728 ± 0.014 | n_estimators=292, learning_rate=0.01303, max_depth=6, min_child_weight=15.61, subsample=0.6714, colsample_bytree=0.678, reg_lambda=0.1487, reg_alpha=0.1917, gamma=2.358 |
+| gradient_boosting | 0.725 | 0.727 ± 0.012 | n_estimators=220, learning_rate=0.03432, max_depth=2, min_samples_leaf=6, subsample=0.7877 |
+| xgboost + selection | 0.719 | 0.726 ± 0.011 | n_estimators=212, learning_rate=0.08265, max_depth=2, min_child_weight=1.177, subsample=0.7439,colsample_bytree=0.6198, reg_lambda=4.976, reg_alpha=0.8586, gamma=3.939, select__min_votes=2 |
+| oblique_random_forest | 0.679 | 0.726 ± 0.012 | estimator__tree__max_depth=4, estimator__tree__min_samples_leaf=1, estimator__project__n_components=7 |
+| hist_gradient_boosting | 0.714 | 0.726 ± 0.014 | max_iter=314, learning_rate=0.01411, max_leaf_nodes=5, min_samples_leaf=85, l2_regularization=2.252 |
+| random_forest | 0.682 | 0.726 ± 0.013 | max_depth=4, min_samples_leaf=8, max_features=0.6226 |
+| logistic_regression | 0.723 | — | — |
+| decision_tree | 0.597 | 0.718 ± 0.011 | max_depth=11, min_samples_leaf=120, criterion=gini |
+| naive_bayes | 0.696 | 0.703 ± 0.012 | var_smoothing=0.0009348 |
+| dummy | 0.500 | — | — |

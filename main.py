@@ -6,6 +6,8 @@ one new row on the scoreboard. The locked test set is never evaluated.
 `python main.py` runs the model in config.yaml. `run(config)` does the same for any config
 dict, which is how `run_all.py` runs every model.
 """
+import shutil
+import tempfile
 from datetime import datetime
 
 import numpy as np
@@ -59,7 +61,20 @@ def prepare_development_data(config: dict):
 
 
 def run(config: dict) -> dict:
-    """Runs the model in `config["model"]`, saves its report and scoreboard row, returns the row."""
+    """
+    Runs the model in `config["model"]`, saves its report and scoreboard row, returns the row.
+    The pipeline caches its fitted preprocessing and selection steps in a temporary folder
+    (a new one per run, removed at the end), so tuning the model doesn't refit them every trial.
+    """
+    cache_dir = tempfile.mkdtemp(prefix="pipeline_cache_")
+    try:
+        return _run(config, cache_dir)
+    finally:
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _run(config: dict, cache_dir: str) -> dict:
+    """The body of `run`; `cache_dir` is where the Pipeline caches its fitted steps."""
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     model_type = config["model"]["type"]
 
@@ -76,12 +91,14 @@ def run(config: dict) -> dict:
         raise ValueError(f"cv.selection_metric '{selection_metric}' must be one of cv.metrics {metrics}")
     scorers = build_scorers(metrics)
     n_jobs = cv_config.get("n_jobs", 1)
+    selection_config = config.get("feature_selection") or {}
+    selection_on = bool(selection_config.get("enabled"))
     print(f"Model: {model_type}   |   selection metric: {selection_metric}   |   "
-          f"{cv_config['n_splits']}-fold CV")
+          f"{cv_config['n_splits']}-fold CV   |   feature selection: {'on' if selection_on else 'off'}")
     print(f"Data:  {len(X_dev)} development rows   |   {n_test} test rows locked away (not used)")
 
     # No-model floor and default hyperparameters, on the same folds
-    pipeline = build_pipeline(config["preprocessing"], config["model"])
+    pipeline = build_pipeline(config["preprocessing"], config["model"], selection_config, memory=cache_dir)
     floor_pipeline = build_pipeline(config["preprocessing"], {"type": "dummy"})
     floor_scores, _ = cross_validate_pipeline(floor_pipeline, X_dev, y_dev, cv,
                                               {selection_metric: scorers[selection_metric]}, selection_metric, n_jobs)
@@ -98,7 +115,9 @@ def run(config: dict) -> dict:
 
     # Tuning, only if it is on and this model has a search space
     tuning_config = config.get("tuning", {})
-    search_space = (tuning_config.get("search_spaces") or {}).get(model_type)
+    model_space = (tuning_config.get("search_spaces") or {}).get(model_type)
+    selection_space = (selection_config.get("search_space") or {}) if selection_on else {}
+    search_space = {**model_space, **selection_space} if model_space else None   # tuned together
     tuned = bool(tuning_config.get("enabled")) and bool(search_space)
     if tuning_config.get("enabled") and not search_space:
         print(f"\nNo tuning.search_spaces entry for '{model_type}': default hyperparameters only.")
@@ -138,10 +157,21 @@ def run(config: dict) -> dict:
 
     pipeline.fit(X_dev, y_dev)
     refit = f"Final model: {model_type} refit on all {len(X_dev)} development rows."
-    report += "\n" + refit + "\n"
+    all_names = [name.split("__", 1)[-1] for name in pipeline[:1].get_feature_names_out()]
+    if selection_on:
+        kept_names = [name.split("__", 1)[-1] for name in pipeline[:-1].get_feature_names_out()]
+        min_votes = pipeline.named_steps["select"].min_votes
+        selection_label = f"vote(min_votes={min_votes})"
+        kept_line = (f"Features kept: {', '.join(kept_names)}   "
+                     f"({len(kept_names)} of {len(all_names)}, min_votes={min_votes})")
+    else:
+        kept_names, selection_label = all_names, "off"
+        kept_line = f"Features kept: all {len(all_names)} (feature selection off)"
+    report += "\n" + refit + "\n" + kept_line + "\n"
 
     # One new row on the scoreboard
     row = {"run": run_id, "data": config["data"]["path"], "model": model_type, "tuned": tuned,
+           "feature_selection": selection_label, "features_kept": ", ".join(kept_names),
            "encoder": config["preprocessing"].get("encoder", "onehot"),
            "scaler": config["preprocessing"].get("scaler", "standard"),
            "params": str(config["model"].get("params")), "tuned_params": str(study.best_params) if tuned else "",
@@ -152,7 +182,7 @@ def run(config: dict) -> dict:
     runs = save_scores(config.get("output", {}).get("scoreboard", "results/runs.csv"), row)
     same = runs[(runs["data"] == row["data"]) & (runs["metric"] == selection_metric)]
     board = (same.sort_values("mean", ascending=False)
-             [["run", "model", "tuned", "encoder", "scaler", "mean", "std", "untuned", "floor"]]
+             [["run", "model", "tuned", "feature_selection", "mean", "std", "untuned", "floor"]]
              .rename(columns={"mean": selection_metric})
              .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print(f"\nScoreboard (runs on the same data and metric; best first)\n{board}")
@@ -161,6 +191,7 @@ def run(config: dict) -> dict:
     run_config = {**config, "tuning": {**tuning_config, "enabled": tuned}}
     path = save_run(config.get("output", {}).get("results_dir", "results"), run_id, run_config, report)
     print(f"\n{refit}\nFull report (per-fold tables, tuning, confusion matrix, fairness): {path}")
+    print(kept_line)
     return row
 
 
