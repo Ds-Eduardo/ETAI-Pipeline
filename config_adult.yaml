@@ -1,0 +1,119 @@
+# Adult income (UCI Adult, 1994 US Census): does this person earn more than 50,000 USD a year?
+# Run with:  python main.py config_adult.yaml
+# Same pipeline as COMPAS; only what is Adult-specific is configured here.
+
+data:
+  path: "data/adult_train.csv"
+  new_path: "data/adult_new.csv"        # 2,000 people without a label: the final model predicts them
+  target: "income_over_50k"
+  sensitive_attr: "sex"                 # audited by the fairness report, never a feature
+  extra_columns: []                     # COMPAS keeps its own score for comparison; Adult has none
+  # id: identifier. fnlwgt: census sampling weight, not a characteristic of the person.
+  # race: the second sensitive attribute is kept OUT of the features too (not audited: the report audits one).
+  drop_columns: ["id", "fnlwgt", "race"]
+
+diagnostics:
+  id_column: "id"
+  placeholder_tokens: ["?", "-", "n/a", "N/A", "na", "NA", ""]      # "?" = unknown (workclass, occupation, native_country)
+  # Adult's own rules: a 17-year-old is valid here (COMPAS's age >= 18 would erase 74 people).
+  # No violations in these files; the rules protect future data. 99999 capital gain is a real top code, not an error.
+  validity_rules:
+    age:            {min: 17, max: 90}
+    hours_per_week: {min: 1, max: 99}
+    capital_gain:   {min: 0}
+    capital_loss:   {min: 0}
+  canonical_categories: {}             # no spelling variants in Adult
+  redundant_columns: ["education"]      # the same information as education_num, one to one
+
+preprocessing:
+  numeric_features: ["age", "education_num", "capital_gain", "capital_loss", "hours_per_week", "v01", "v02", "v03", "v04", "v05", "v06", "v07", "v08", "v09", "v10", "v11", "v12", "v13", "v14", "v15", "v16", "v17", "v18"]
+  categorical_features: ["workclass", "marital_status", "occupation", "relationship", "native_country", "v19", "v20", "v21", "v22", "v23", "v24", "v25"]
+  # The 379 people with workclass "?" are the same as occupation "?": being missing carries information
+  # (they earn > 50K about half as often), so one flag is enough, besides the imputation.
+  mnar_indicator_sources: ["workclass"]
+  encoder: "target"                     # native_country has 41 values, many rare: target encoding shrinks them towards the mean
+  scaler: "robust"
+  random_state: 42
+  engineer_features: false              # add_engineered_features() only knows COMPAS's columns
+  imputation:
+    numeric_strategy: "median"
+    categorical_strategy: "most_frequent"
+
+split:
+  test_size: 0.2
+  random_state: 42
+
+cv:
+  n_splits: 5
+  shuffle: true
+  random_state: 42
+  metrics: ["accuracy", "balanced_accuracy", "precision", "recall", "f1", "fbeta_2", "roc_auc", "average_precision"]
+  selection_metric: "roc_auc"
+  n_jobs: 1
+
+# Learned step between preprocessing and the model: keeps the features that at least
+# min_votes of three models choose. The v01-v25 columns are undocumented: selection decides.
+feature_selection:
+  enabled: true
+  min_votes: 2
+  random_state: 42
+  search_space:
+    select__min_votes: {type: int, low: 1, high: 3}
+
+tuning:
+  enabled: true
+  n_trials: 30
+  n_splits: 5
+  random_state: 42
+  n_jobs: 1
+  search_spaces:
+    decision_tree:
+      model__max_depth:        {type: int, low: 1, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__criterion:        {type: categorical, choices: ["gini", "entropy"]}
+    random_forest:
+      model__max_depth:        {type: int, low: 2, high: 20}
+      model__min_samples_leaf: {type: int, low: 1, high: 50, log: true}
+      model__max_features:     {type: float, low: 0.2, high: 1.0}
+    adaboost:
+      model__n_estimators:         {type: int, low: 50, high: 500}
+      model__learning_rate:        {type: float, low: 0.01, high: 2.0, log: true}
+      model__estimator__max_depth: {type: int, low: 1, high: 4}
+    gradient_boosting:
+      model__n_estimators:     {type: int, low: 25, high: 500, log: true}
+      model__learning_rate:    {type: float, low: 0.01, high: 0.5, log: true}
+      model__max_depth:        {type: int, low: 1, high: 6}
+      model__min_samples_leaf: {type: int, low: 1, high: 200, log: true}
+      model__subsample:        {type: float, low: 0.5, high: 1.0}
+    hist_gradient_boosting:
+      model__max_iter:          {type: int, low: 25, high: 500, log: true}
+      model__learning_rate:     {type: float, low: 0.01, high: 0.5, log: true}
+      model__max_leaf_nodes:    {type: int, low: 2, high: 63, log: true}
+      model__min_samples_leaf:  {type: int, low: 5, high: 200, log: true}
+      model__l2_regularization: {type: float, low: 0.000001, high: 10.0, log: true}
+    naive_bayes:
+      model__var_smoothing: {type: float, low: 1.0e-11, high: 1.0e-3, log: true}
+    xgboost:
+      model__n_estimators:     {type: int, low: 50, high: 600, log: true}
+      model__learning_rate:    {type: float, low: 0.01, high: 0.3, log: true}
+      model__max_depth:        {type: int, low: 1, high: 8}
+      model__min_child_weight: {type: float, low: 1.0, high: 50.0, log: true}
+      model__subsample:        {type: float, low: 0.5, high: 1.0}
+      model__colsample_bytree: {type: float, low: 0.5, high: 1.0}
+      model__reg_lambda:       {type: float, low: 0.01, high: 10.0, log: true}
+      model__reg_alpha:        {type: float, low: 0.001, high: 10.0, log: true}
+      model__gamma:            {type: float, low: 0.0, high: 5.0}
+
+model:
+  type: "xgboost"
+  params:
+    n_estimators: 300
+    learning_rate: 0.05
+    max_depth: 4
+    random_state: 42
+    n_jobs: -1
+
+output:
+  results_dir: "results_adult"                    # its own folder: the COMPAS scoreboard stays untouched
+  scoreboard: "results_adult/runs.csv"
+  predictions: "results_adult/predictions.csv"    # id, probability, prediction for data.new_path

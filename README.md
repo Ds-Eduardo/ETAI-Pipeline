@@ -136,3 +136,45 @@ The smaller model is as good as the full one: it gives up 0.001 ROC-AUC, about a
 | decision_tree | 0.597 | 0.718 ± 0.011 | max_depth=11, min_samples_leaf=120, criterion=gini |
 | naive_bayes | 0.696 | 0.703 ± 0.012 | var_smoothing=0.0009348 |
 | dummy | 0.500 | — | — |
+
+
+
+## Beyond COMPAS (W9): Adult income
+
+New data, same kind of question: does a person earn more than 50,000 USD a year? The model is trained on `data/adult_train.csv` (6,000 people) and predicts the 2,000 people of `data/adult_new.csv`.
+
+**How to run**
+
+```
+python main.py config_adult.yaml    # Adult
+python main.py                      # COMPAS, unchanged
+```
+
+Adult has its own config and output folder, `results_adult/`: one report per run, the scoreboard `runs.csv`, and `predictions.csv` (`id`, `probability`, and a 0/1 `prediction` at threshold 0.5 for the 2,000 new people; rows out = rows in).
+
+**Choices:** `sex` is the audited attribute; `race` is kept out of the features as well. `fnlwgt` (a sampling weight) and `id` are not features, and `education` is dropped because it duplicates `education_num`. The 25 anonymised `v` columns are all kept as features and left to feature selection.
+
+**What broke, why, and how it was fixed**
+
+| What | Why | Fix |
+|---|---|---|
+| Engineered features ran on every dataset | their columns are COMPAS's; on Adult they silently did nothing | `preprocessing.engineer_features` flag in the config |
+| `main.py` always loaded `config.yaml` | one problem hard-wired | the config path is an argument |
+| Default extra column `score_text` | it is COMPAS's own score; Adult has none | `data.extra_columns: []` |
+| COMPAS validity rule `age >= 18` | it would erase the 74 people aged 17 | Adult's own rules in the config (`age` 17–90, `hours_per_week` 1–99, gains and losses ≥ 0) |
+| `?` read as a category | it is a missing value written as text | `placeholder_tokens` in the config, plus a missingness flag for `workclass` (the same 379 people are missing `occupation`) |
+| Fairness text spoke of reoffending | wording tied to recidivism | generic wording: true label 0 but predicted 1 |
+| No way to predict unlabeled rows | the pipeline only evaluated | `predict_new_data()`: same cleaning, no de-duplication, same feature split |
+| Scoreboard shared between problems | one output folder | own `output` folder per config |
+
+**Results** (XGBoost + feature selection, tuned, nested CV on the development set):
+
+| Metric | Target | No model | Default tree | Ours |
+|---|---|---|---|---|
+| ROC-AUC | ≥ 0.90 | 0.50 | 0.72 | **0.910 ± 0.015** |
+| Accuracy | ≥ 0.855 | 0.76 | 0.80 | **0.861 ± 0.009** |
+| F1 (class 1) | ≥ 0.66 | 0.00 | 0.58 | **0.678 ± 0.028** |
+
+Chosen hyperparameters: n_estimators=354, learning_rate=0.05299, max_depth=5, min_child_weight=1.66, subsample=0.74, colsample_bytree=0.5877, reg_lambda=0.3777, reg_alpha=0.02789, gamma=3.764, select__min_votes=1. Features kept (8 of 36): age, education_num, capital_gain, capital_loss, hours_per_week, marital_status, occupation, relationship.
+
+The hardest assumptions to find were: the COMPAS-only engineered features, which did nothing on Adult instead of failing, and the default `score_text` extra column; a hard error would have pointed straight at them. What got us to the target scores was the cleaning and the model more than the tuning: turning `?` into real missing values (with a flag for the people whose workclass and occupation are unknown), target-encoding `native_country`, and a boosted-tree model. With default parameters XGBoost already reached an untuned ROC-AUC of 0.913 ± 0.016, and the tuned nested-CV score (0.910 ± 0.015) is no better, within the fold std. Feature selection kept 8 of 36 columns and none of the 25 anonymised `v` columns, which suggests they add little here. The accuracy margin over the target (0.861 against 0.855) is smaller than its fold std (0.009), so it is a pass but not a comfortable one.

@@ -135,7 +135,7 @@ def fairness_report(y_true, oof_proba, extras: pd.DataFrame, sensitive_attr: str
 
     lines = [
         f"False positive rate by {sensitive_attr} (development set, out-of-fold)",
-        "(share of people who did NOT reoffend, but were predicted to)",
+        "(share of people whose true label is 0 who were predicted 1)",
         "",
     ]
     for label, col in predictors:

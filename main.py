@@ -3,15 +3,16 @@ Run the configured model on the development set: default hyperparameters, the no
 Optuna tuning with nested CV (if it is on and the model has a search space), the reports, and
 one new row on the scoreboard. The locked test set is never evaluated.
 
-`python main.py` runs the model in config.yaml. `run(config)` does the same for any config
-dict, which is how `run_all.py` runs every model.
 """
+import os
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 
 import numpy as np
 import optuna
+import pandas as pd
 import yaml
 from sklearn.model_selection import StratifiedKFold
 
@@ -45,7 +46,8 @@ def prepare_development_data(config: dict):
     diagnostics = config["diagnostics"]
     df = load_data(config["data"]["path"])
     df = clean_dataset(df, diagnostics)
-    df = add_engineered_features(df)
+    if config["preprocessing"].get("engineer_features", False):     # COMPAS-specific columns
+        df = add_engineered_features(df)
     df = drop_duplicate_rows(df, diagnostics.get("id_column"))   # training data only
 
     X, y, extras = split_features_target(
@@ -58,6 +60,33 @@ def prepare_development_data(config: dict):
         random_state=test_set["random_state"],
     )
     return X_dev, y_dev, extras_dev, len(X_test)
+
+
+def predict_new_data(config: dict, pipeline, output_path: str) -> int:
+    """
+    Predicts the rows of `data.new_path` (no label) with the refit pipeline and saves id,
+    probability and 0/1 prediction (threshold 0.5) to `output_path`. Same cleaning and feature
+    split as the training data, but no de-duplication: every row gets a prediction.
+    Returns the number of rows written (always the number of rows read).
+    """
+    data_config = config["data"]
+    id_column = config["diagnostics"].get("id_column")
+    df = load_data(data_config["new_path"])
+    df = clean_dataset(df, config["diagnostics"])
+    if config["preprocessing"].get("engineer_features", False):
+        df = add_engineered_features(df)
+    ids = df[id_column].to_numpy() if id_column else df.index.to_numpy()
+    X_new, _no_target, _extras = split_features_target(
+        df, data_config, config["preprocessing"].get("mnar_indicator_sources", [])
+    )
+    probability = pipeline.predict_proba(X_new)[:, 1]
+    predictions = pd.DataFrame({id_column or "row": ids, "probability": probability,
+                                "prediction": (probability >= 0.5).astype(int)})
+    if len(predictions) != len(df):
+        raise RuntimeError("Rows out must equal rows in.")
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    predictions.to_csv(output_path, index=False)
+    return len(predictions)
 
 
 def run(config: dict) -> dict:
@@ -169,6 +198,14 @@ def _run(config: dict, cache_dir: str) -> dict:
         kept_line = f"Features kept: all {len(all_names)} (feature selection off)"
     report += "\n" + refit + "\n" + kept_line + "\n"
 
+    # Rows without a label (if the config has some): predicted by the refit pipeline
+    pred_line = ""
+    predictions_path = config.get("output", {}).get("predictions")
+    if predictions_path and config["data"].get("new_path"):
+        n_new = predict_new_data(config, pipeline, predictions_path)
+        pred_line = f"Predictions for {config['data']['new_path']}: {n_new} rows saved to {predictions_path}"
+        report += pred_line + "\n"
+
     # One new row on the scoreboard
     row = {"run": run_id, "data": config["data"]["path"], "model": model_type, "tuned": tuned,
            "feature_selection": selection_label, "features_kept": ", ".join(kept_names),
@@ -191,12 +228,15 @@ def _run(config: dict, cache_dir: str) -> dict:
     run_config = {**config, "tuning": {**tuning_config, "enabled": tuned}}
     path = save_run(config.get("output", {}).get("results_dir", "results"), run_id, run_config, report)
     print(f"\n{refit}\nFull report (per-fold tables, tuning, confusion matrix, fairness): {path}")
+    if pred_line:
+        print(pred_line)
     print(kept_line)
     return row
 
 
 def main():
-    run(load_config())
+    # `python main.py` runs config.yaml (COMPAS); `python main.py config_adult.yaml` another problem
+    run(load_config(sys.argv[1] if len(sys.argv) > 1 else "config.yaml"))
 
 
 if __name__ == "__main__":
