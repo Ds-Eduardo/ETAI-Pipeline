@@ -52,9 +52,13 @@ preprocessing:
   encoder: "target"
   scaler: "robust"
   random_state: 42          # seed of the target encoder's internal cross-fitting
+  engineer_features: true              # add_engineered_features() only knows COMPAS's columns
   imputation:
-    numeric_strategy: "median"
+    numeric_strategy: "median"         # median | mean | knn | iterative | random_forest
     categorical_strategy: "most_frequent"
+    n_neighbors: 5          # knn
+    max_iter: 10            # iterative, random_forest
+    n_estimators: 50        # random_forest (trees per column)
 
 
 split:                      # the locked test set: never used to fit, tune or choose anything

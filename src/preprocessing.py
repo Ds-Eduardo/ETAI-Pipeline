@@ -8,8 +8,11 @@ data (imputation, encoding, scaling) lives in `build_preprocessor`, inside the m
 """
 import numpy as np
 import pandas as pd
+import sklearn
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.experimental import enable_iterative_imputer  
+from sklearn.impute import IterativeImputer, KNNImputer, SimpleImputer
 from sklearn.model_selection import train_test_split, StratifiedKFold
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
@@ -207,6 +210,7 @@ def split_features_target(df: pd.DataFrame, data_config: dict, mnar_indicator_so
     excluded = set(drop_columns) | set(extra_columns) | {target, sensitive_attr}
     feature_cols = [c for c in df.columns if c not in excluded]
     return df[feature_cols], y, extras
+
  
  
 _SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
@@ -218,7 +222,17 @@ _ENCODERS = {
     "count": lambda seed: CountEncoder(handle_unknown=0, handle_missing=0),
     "target": lambda seed: TargetEncoder(target_type="binary", cv=StratifiedKFold(5, shuffle=True, random_state=seed)),
 }
- 
+
+_NUMERIC_IMPUTERS = {
+    "median": lambda cfg, seed: SimpleImputer(strategy="median"),
+    "mean": lambda cfg, seed: SimpleImputer(strategy="mean"),
+    "knn": lambda cfg, seed: KNNImputer(n_neighbors=cfg.get("n_neighbors", 5)),
+    "iterative": lambda cfg, seed: IterativeImputer(max_iter=cfg.get("max_iter", 10), random_state=seed),
+    "random_forest": lambda cfg, seed: IterativeImputer(
+        estimator=RandomForestRegressor(n_estimators=cfg.get("n_estimators", 50), min_samples_leaf=5,
+                                        random_state=seed, n_jobs=-1),
+        max_iter=cfg.get("max_iter", 10), random_state=seed),
+} 
  
 def _lookup(options: dict, key: str, kind: str):
     try:
@@ -243,10 +257,11 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
     encoder_factory = _lookup(_ENCODERS, preprocessing_config.get("encoder", "onehot"), "encoder")
     encoder = encoder_factory(preprocessing_config.get("random_state"))
- 
+
+    numeric_imputer = _lookup(_NUMERIC_IMPUTERS, imputation.get("numeric_strategy", "median"), "numeric_strategy")
     numeric_pipeline = Pipeline([
-        ("impute", SimpleImputer(strategy=imputation.get("numeric_strategy", "median"))),
         ("scale", scaler),
+        ("impute", numeric_imputer(imputation, preprocessing_config.get("random_state"))),
     ])
     categorical_pipeline = Pipeline([
         ("impute", SimpleImputer(strategy=imputation.get("categorical_strategy", "most_frequent"))),

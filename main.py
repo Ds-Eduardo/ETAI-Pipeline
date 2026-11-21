@@ -3,6 +3,8 @@ Run the configured model on the development set: default hyperparameters, the no
 Optuna tuning with nested CV (if it is on and the model has a search space), the reports, and
 one new row on the scoreboard. The locked test set is never evaluated.
 
+`python main.py` runs the model in config.yaml. `run(config)` does the same for any config
+dict, which is how `run_all.py` runs every model.
 """
 import os
 import shutil
@@ -11,11 +13,12 @@ import tempfile
 from datetime import datetime
 
 import numpy as np
+import joblib
 import optuna
-import pandas as pd
 import yaml
 from sklearn.model_selection import StratifiedKFold
 
+from predict import predict
 from src.data import load_data
 from src.evaluate import (
     build_scorers,
@@ -63,27 +66,8 @@ def prepare_development_data(config: dict):
 
 
 def predict_new_data(config: dict, pipeline, output_path: str) -> int:
-    """
-    Predicts the rows of `data.new_path` (no label) with the refit pipeline and saves id,
-    probability and 0/1 prediction (threshold 0.5) to `output_path`. Same cleaning and feature
-    split as the training data, but no de-duplication: every row gets a prediction.
-    Returns the number of rows written (always the number of rows read).
-    """
-    data_config = config["data"]
-    id_column = config["diagnostics"].get("id_column")
-    df = load_data(data_config["new_path"])
-    df = clean_dataset(df, config["diagnostics"])
-    if config["preprocessing"].get("engineer_features", False):
-        df = add_engineered_features(df)
-    ids = df[id_column].to_numpy() if id_column else df.index.to_numpy()
-    X_new, _no_target, _extras = split_features_target(
-        df, data_config, config["preprocessing"].get("mnar_indicator_sources", [])
-    )
-    probability = pipeline.predict_proba(X_new)[:, 1]
-    predictions = pd.DataFrame({id_column or "row": ids, "probability": probability,
-                                "prediction": (probability >= 0.5).astype(int)})
-    if len(predictions) != len(df):
-        raise RuntimeError("Rows out must equal rows in.")
+    """Predicts the rows of `data.new_path` (no label) with `predict.predict` and saves them."""
+    predictions = predict(load_data(config["data"]["new_path"]), pipeline, config)
     os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
     predictions.to_csv(output_path, index=False)
     return len(predictions)
@@ -122,8 +106,9 @@ def _run(config: dict, cache_dir: str) -> dict:
     n_jobs = cv_config.get("n_jobs", 1)
     selection_config = config.get("feature_selection") or {}
     selection_on = bool(selection_config.get("enabled"))
+    imputer = config["preprocessing"].get("imputation", {}).get("numeric_strategy", "median")
     print(f"Model: {model_type}   |   selection metric: {selection_metric}   |   "
-          f"{cv_config['n_splits']}-fold CV   |   feature selection: {'on' if selection_on else 'off'}")
+          f"{cv_config['n_splits']}-fold CV   |   feature selection: {'on' if selection_on else 'off'}   |   imputer: {imputer}")
     print(f"Data:  {len(X_dev)} development rows   |   {n_test} test rows locked away (not used)")
 
     # No-model floor and default hyperparameters, on the same folds
@@ -206,9 +191,17 @@ def _run(config: dict, cache_dir: str) -> dict:
         pred_line = f"Predictions for {config['data']['new_path']}: {n_new} rows saved to {predictions_path}"
         report += pred_line + "\n"
 
+    # The final fitted pipeline: what predict.py loads to predict new data.
+    model_path = config.get("output", {}).get("model_path", "models/model.joblib")
+    os.makedirs(os.path.dirname(model_path) or ".", exist_ok=True)
+    pipeline.set_params(memory=None)        # the cache folder is deleted at the end of the run; the saved model doesn't need it
+    joblib.dump(pipeline, model_path)
+    model_line = f"Model saved to {model_path}"
+    report += model_line + "\n"
+
     # One new row on the scoreboard
     row = {"run": run_id, "data": config["data"]["path"], "model": model_type, "tuned": tuned,
-           "feature_selection": selection_label, "features_kept": ", ".join(kept_names),
+           "feature_selection": selection_label, "imputer": imputer, "features_kept": ", ".join(kept_names),
            "encoder": config["preprocessing"].get("encoder", "onehot"),
            "scaler": config["preprocessing"].get("scaler", "standard"),
            "params": str(config["model"].get("params")), "tuned_params": str(study.best_params) if tuned else "",
@@ -219,7 +212,7 @@ def _run(config: dict, cache_dir: str) -> dict:
     runs = save_scores(config.get("output", {}).get("scoreboard", "results/runs.csv"), row)
     same = runs[(runs["data"] == row["data"]) & (runs["metric"] == selection_metric)]
     board = (same.sort_values("mean", ascending=False)
-             [["run", "model", "tuned", "feature_selection", "mean", "std", "untuned", "floor"]]
+             [["run", "model", "tuned", "feature_selection", "imputer", "mean", "std", "untuned", "floor"]]
              .rename(columns={"mean": selection_metric})
              .to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print(f"\nScoreboard (runs on the same data and metric; best first)\n{board}")
@@ -230,6 +223,7 @@ def _run(config: dict, cache_dir: str) -> dict:
     print(f"\n{refit}\nFull report (per-fold tables, tuning, confusion matrix, fairness): {path}")
     if pred_line:
         print(pred_line)
+    print(model_line)
     print(kept_line)
     return row
 

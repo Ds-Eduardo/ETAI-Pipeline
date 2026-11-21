@@ -178,3 +178,28 @@ Adult has its own config and output folder, `results_adult/`: one report per run
 Chosen hyperparameters: n_estimators=354, learning_rate=0.05299, max_depth=5, min_child_weight=1.66, subsample=0.74, colsample_bytree=0.5877, reg_lambda=0.3777, reg_alpha=0.02789, gamma=3.764, select__min_votes=1. Features kept (8 of 36): age, education_num, capital_gain, capital_loss, hours_per_week, marital_status, occupation, relationship.
 
 The hardest assumptions to find were: the COMPAS-only engineered features, which did nothing on Adult instead of failing, and the default `score_text` extra column; a hard error would have pointed straight at them. What got us to the target scores was the cleaning and the model more than the tuning: turning `?` into real missing values (with a flag for the people whose workclass and occupation are unknown), target-encoding `native_country`, and a boosted-tree model. With default parameters XGBoost already reached an untuned ROC-AUC of 0.913 ± 0.016, and the tuned nested-CV score (0.910 ± 0.015) is no better, within the fold std. Feature selection kept 8 of 36 columns and none of the 25 anonymised `v` columns, which suggests they add little here. The accuracy margin over the target (0.861 against 0.855) is smaller than its fold std (0.009), so it is a pass but not a comfortable one.
+
+## Week 10
+### Missing values
+
+XGBoost, default hyperparameters, feature selection on, ROC-AUC on the development set (5-fold stratified CV, same folds for every imputer). 3.41% of the numeric cells are missing (1,379), mostly in `priors_count` (397) and in the features derived from it; `age` has 120 gaps.
+
+| Imputer | ROC-AUC (mean ± std) | Difference vs median | Folds better than median | p (corrected test) | Time |
+|---|---|---|---|---|---|
+| median (baseline) | 0.719 ± 0.013 | — | — | — | 10 s |
+| KNN | 0.719 ± 0.012 | −0.0003 | 3/5 | 0.782 | 18 s |
+| iterative (MICE, one completed dataset) | 0.721 ± 0.011 | +0.0013 | 3/5 | 0.521 | 17 s |
+| random forest (missForest) | 0.717 ± 0.011 | −0.0024 | 1/5 | 0.213 | 119 s |
+
+I keep the median imputer. No model-based imputer beats it: the differences (−0.0024 to +0.0013) are at most about a quarter of the fold-to-fold std (0.011–0.013), none wins in more than 3 of 5 folds, and no corrected p-value is below 0.2. The gaps are few and the final model keeps only three features (`age`, `priors_count`, `priors_per_adult_year`), so a smarter guess has little to change, while iterative and KNN cost about 1.7× the time of the median and the random forest about 12× (and warned it had not converged in 10 iterations). With only 5 folds the test has little power, so this means "no detectable gain", not "no difference".
+
+### Predicting new data
+
+```
+python main.py                                                   # train, evaluate, save models/model.joblib
+python predict.py data/compas_new_people.csv predictions.csv     # predict, no training
+```
+
+`predictions.csv` has one row per input row (20 in, 20 out): the `id`, the `probability` of two-year recidivism and the `prediction` (1 if the probability is at least 0.5). 
+Result for the 20 new people: 6 are predicted to reoffend (ids 900004, 900006, 900008, 900012, 900014 and 900017) and 14 are not. The mean probability is 0.456, from 0.208 (id 900011) to 0.855 (id 900012). Only two people are clearly above the threshold; 900004 (0.532) and 900008 (0.516) are barely over it, and 900013 (0.474) and the repeated person (0.456) are just under it, so those predictions would flip with a slightly different cut-off. The probabilities are a ranking, not a verdict, and an overall AUC of about 0.72 means many individual calls are uncertain.
+

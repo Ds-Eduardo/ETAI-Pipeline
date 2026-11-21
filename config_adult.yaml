@@ -36,8 +36,12 @@ preprocessing:
   random_state: 42
   engineer_features: false              # add_engineered_features() only knows COMPAS's columns
   imputation:
-    numeric_strategy: "median"
+    numeric_strategy: "median"          # median | mean | knn | iterative | random_forest
     categorical_strategy: "most_frequent"
+    n_neighbors: 5                      # knn
+    max_iter: 10                        # iterative, random_forest
+    n_estimators: 50                    # random_forest (trees per column)
+
 
 split:
   test_size: 0.2
