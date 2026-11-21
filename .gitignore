@@ -5,5 +5,9 @@ __pycache__/
 .ipynb_checkpoints/
 *.egg-info/
 results/
+<<<<<<< HEAD
 models/
 predictions.csv
+=======
+results_adult/
+>>>>>>> c395be5fabfe1b944c941148af5e05674f94a0c9
